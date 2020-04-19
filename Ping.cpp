@@ -44,7 +44,7 @@ struct Packet {
 bool executePing = true;
 
 void finish(int);
-void setIP(char *host, char *ip, int &ipType, int &icmpType, sockaddr *&pingTarget);
+void setIP(char *host, char *ip, int &ipType, int &icmpType, struct addrinfo *&target);
 void pingAddr(const int &sckt, char *ip, const int &icmpType, const int &settings, struct Options &pingSettings,
               sockaddr *pingAddr);
 unsigned short checksum(void *b, int len);
@@ -58,7 +58,7 @@ int main() {
     char host[] = "google.com";
     int pingSettingsOn = 0;
     struct Options pingSettings;
-    struct sockaddr *pingTarget;
+    struct addrinfo *pingTarget;
 
     setIP(host, ip, ipType, icmpType, pingTarget);
 
@@ -68,7 +68,7 @@ int main() {
 
     signal(SIGINT, finish);
     clock_gettime(CLOCK_MONOTONIC, &pingStart);
-    pingAddr(echoSocket, ip, icmpType, pingSettingsOn, pingSettings, pingTarget);
+    pingAddr(echoSocket, ip, icmpType, pingSettingsOn, pingSettings, pingTarget->ai_addr);
     clock_gettime(CLOCK_MONOTONIC, &pingEnd);
 
 }
@@ -77,10 +77,9 @@ void finish(int code){
     executePing = false;
 }
 
-void setIP(char *host, char *ip, int &ipType, int &icmpType, struct sockaddr *&targetAddr) {
+void setIP(char *host, char *ip, int &ipType, int &icmpType, struct addrinfo *&target) {
     int status;
     struct addrinfo ipSettings;
-    struct addrinfo *target;
     char res[INET6_ADDRSTRLEN];
 
     memset(&ipSettings, 0, sizeof ipSettings); // make sure the struct is empty
@@ -92,12 +91,10 @@ void setIP(char *host, char *ip, int &ipType, int &icmpType, struct sockaddr *&t
     }
 
     if (target->ai_family == AF_INET){
-        targetAddr = target->ai_addr;
-        struct sockaddr_in* ipv4 = (struct sockaddr_in*)targetAddr;
+        struct sockaddr_in* ipv4 = (struct sockaddr_in*)target->ai_addr;
         inet_ntop(AF_INET, &(ipv4->sin_addr), res, sizeof res);
     } else{
-        targetAddr = target->ai_addr;
-        struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)targetAddr;
+        struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)target->ai_addr;
         inet_ntop(AF_INET6, &(ipv6->sin6_addr), res, sizeof res);
     }
 
