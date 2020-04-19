@@ -118,8 +118,6 @@ void pingAddr(const int &sckt, char *ip, const int &icmpType, const int &setting
     unsigned int msgCount = 0, msgRecvCount = 0, addressLength,
                  msgLength = pingSettings.packet_size - sizeof(icmphdr);
     struct timeval timeOut;
-
-
     timeOut.tv_sec = pingSettings.timeout;
     timeOut.tv_usec = 0;
 
