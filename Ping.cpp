@@ -55,7 +55,7 @@ int main() {
     int echoSocket;
     char ip[INET6_ADDRSTRLEN];
     int ipType, icmpType;
-    char host[] = "google.com";
+    char host[] = "192.1.1.1";
     int pingSettingsOn = 0;
     struct Options pingSettings;
     struct addrinfo *pingTarget;
@@ -65,6 +65,8 @@ int main() {
     struct timespec pingStart, pingEnd;
 
     echoSocket = socket(ipType, SOCK_RAW, icmpType);
+
+    cout<<"echoSocket: "<<echoSocket<<endl;
 
     signal(SIGINT, finish);
     clock_gettime(CLOCK_MONOTONIC, &pingStart);
@@ -100,7 +102,7 @@ void setIP(char *host, char *ip, int &ipType, int &icmpType, struct addrinfo *&t
 
     ipType = target->ai_family;
     if(ipType == AF_INET){
-
+        icmpType = IPPROTO_ICMP;
     } else {
         icmpType = IPPROTO_ICMPV6;
     }
@@ -115,23 +117,29 @@ void pingAddr(const int &sckt, char *ip, const int &icmpType, const int &setting
     struct sockaddr_in returnAddr;
     long double rtt_msec = 0., rtt_avg_msec = 0., total_msec = 0.;
 
+    int ttl_val = 64, status;
+
     unsigned int msgCount = 0, msgRecvCount = 0, addressLength,
                  msgLength = pingSettings.packet_size - sizeof(icmphdr);
     struct timeval timeOut;
-
 
     timeOut.tv_sec = pingSettings.timeout;
     timeOut.tv_usec = 0;
 
     initPacket(pingSettings.packet_size, packet);
-    if(!(setsockopt(sckt, icmpType, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)))){
-        cout<<"\nSetting socket options to TTL failed"<<endl;
+    if((status = setsockopt(sckt, SOL_IP, IP_TTL, &ttl_val, sizeof(ttl_val))) != 0){
+        cout<<"sockoptfail"<<endl;
+        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
         return;
     } else {
         cout<<"\nSocket set to TTL..."<<endl;
     }
 
+    cout<<"break 1"<<endl;
+
     setsockopt(sckt, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeOut, sizeof(timeOut));
+
+    cout<<"break 2"<<endl;
 
     while(executePing){
         bool packetSent = true;
