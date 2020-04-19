@@ -180,7 +180,7 @@ void pingAddr(const int &sckt, char *ip, const int &icmpType, const int &setting
 }
 
 unsigned short checksum(void *b, int len){
-    auto *ref = (unsigned short *)b;
+    unsigned short *ref = (unsigned short *)b;
     unsigned short result;
     unsigned int sum = 0;
 
