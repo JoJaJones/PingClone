@@ -179,7 +179,7 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
 
         addressLength = sizeof(returnAddr);
 
-        if(recvfrom(sckt, &packet, sizeof(packet), 0, (struct sockaddr *)&returnAddr, &addressLength) <= 0
+        if(recvfrom(sckt, &packet, sizeof(packet), 0, (struct sockaddr *)&returnAddr, (socklen_t *)&addressLength) <= 0
             && msgCount > 1){
             cout<<"\nPacket receive failed"<<endl;
             fprintf(stderr, "receive error: %d\n", errno);
