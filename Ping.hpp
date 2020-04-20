@@ -18,7 +18,7 @@
 #include <ctime>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include "ip_icmp.h"
+//#include "ip_icmp.h"
 #include <netinet/ip_icmp.h>
 #include <unistd.h>
 
@@ -41,7 +41,7 @@ struct Packet {
     unsigned char code;
     unsigned short checksum;
     unsigned short id;
-    unsigned short seq;char msg[MAX_PACKET_LENGTH - sizeof(struct icmp)];
+    unsigned short seq;char msg[MAX_PACKET_LENGTH - 8];
 };
 
 void finish(int);

@@ -144,23 +144,24 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
     long double rtt_msec = 0., rtt_avg_msec = 0., total_msec = 0., total_time = 0.;
     double elapsed;
 
-    int msgCount = 0, msgRecvCount = 0, addressLength,
-            msgLength = pingSettings.packet_size - sizeof(icmp);
+    unsigned short msgCount = 0;
+    int msgRecvCount = 0, addressLength,
+            msgLength = pingSettings.packet_size - 8;
 
     // set timeout time from pingSettings struct
     timeOut.tv_sec = (int)(pingSettings.timeout / 1000);
     timeOut.tv_usec = (int)(pingSettings.timeout * 1000);
 
     // set time to live for packets
-//    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)) != 0){
-//        std::cout<<"sockoptfail"<<std::endl;
-//        return;
-//    } else {
-//        std::cout << "\nSocket set to TTL..." << std::endl;
-//    }
-//
-//    // set timeout for receiving a response
-//    setsockopt(sckt, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeOut, sizeof(timeOut));
+    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)) != 0){
+        std::cout<<"sockoptfail"<<std::endl;
+        return;
+    } else {
+        std::cout << "\nSocket set to TTL..." << std::endl;
+    }
+
+    // set timeout for receiving a response
+    setsockopt(sckt, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeOut, sizeof(timeOut));
 
 
     clock_gettime(CLOCK_MONOTONIC, &pingStart);
@@ -183,7 +184,7 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
 
         packet.msg[msgLength] = 0;
         packet.seq = msgCount++;
-        packet.checksum = checksum(&packet, sizeof(packet));
+        packet.checksum = 0;
 
         usleep(pingSettings.interval);
         clock_gettime(CLOCK_MONOTONIC, &curStart);
@@ -223,7 +224,7 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
 
             // if a packet was successfully sent output relevate results of the receive operation
             if(packetSent){
-                if(!(packet.type == 0 && packet.code == 0)){
+                if(!(packet.type == 69 && packet.code == 0)){
                     printf("Error, TCMP type %d code %d\n", packet.type, packet.code);
                 } else if (executePing) {
                     std::cout<<pingSettings.packet_size<<" bytes from "<<host<<" ("<<ip<<") message seq = "<<msgCount
