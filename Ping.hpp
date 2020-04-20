@@ -37,8 +37,11 @@ struct Options {
 };
 
 struct Packet {
-    struct icmp hdr;
-    char msg[MAX_PACKET_LENGTH - sizeof(struct icmp)];
+    unsigned char type;
+    unsigned char code;
+    unsigned short checksum;
+    unsigned short id;
+    unsigned short seq;char msg[MAX_PACKET_LENGTH - sizeof(struct icmp)];
 };
 
 void finish(int);
