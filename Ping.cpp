@@ -48,7 +48,6 @@ int main() {
 
     // generate appropriate raw socket for ICMP requests
     echoSocket = socket(ipType, SOCK_RAW, icmpType);
-
 //    for (int i = 2; i < argc; ++i) {
 //        if(argv[i][0] == '-'){
 //            //set
@@ -62,6 +61,7 @@ int main() {
 
     // begin pinging the target address
     if(icmpType == IPPROTO_ICMP) {
+        sa.sin_addr.s_addr = htonl(sa.sin_addr.s_addr);
         pingAddr(echoSocket, host, ip, pingSettingsOn, pingSettings, (struct sockaddr *) &sa, sizeof(sa));
     } else {
         pingSettings.ipv6 = true;
@@ -135,7 +135,7 @@ void setIP(char *host, char *ip, int &ipType, int &icmpType) {
 void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Options &pingSettings,
               struct sockaddr *pingTarget, int targetSize) {
     struct timespec pingStart, pingEnd, curStart, curEnd;    // structs for timing ping process
-    struct Packet packet;                                    // packet struct
+    struct Packet packetOut, packetIn;                                    // packet struct
     struct sockaddr_in returnAddr;
     struct sockaddr_in6 returnAddr6;
     struct timeval timeOut;
@@ -150,64 +150,78 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
 
     // set timeout time from pingSettings struct
     timeOut.tv_sec = (int)(pingSettings.timeout / 1000);
-    timeOut.tv_usec = (int)(pingSettings.timeout * 1000);
+    timeOut.tv_usec = (int)(pingSettings.timeout * 1000)%1000000;
 
     // set time to live for packets
-    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)) != 0){
-        std::cout<<"sockoptfail"<<std::endl;
-        return;
-    } else {
-        std::cout << "\nSocket set to TTL..." << std::endl;
-    }
+//    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)) != 0){
+//        std::cout<<"sockoptfail"<<std::endl;
+//        return;
+//    } else {
+//        std::cout << "\nSocket set to TTL..." << std::endl;
+//    }
 
     // set timeout for receiving a response
-    setsockopt(sckt, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeOut, sizeof(timeOut));
+    if (setsockopt (sckt, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeOut, sizeof(timeOut)) < 0) {
+        std::cout<<"Setting Receive Time Out Failed"<<std::endl;
+    }
 
+    if (setsockopt (sckt, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeOut, sizeof(timeOut)) < 0) {
+        std::cout<<"Setting Send Time Out Failed"<<std::endl;
+    }
 
+    std::cout<<sckt<<std::endl;
     clock_gettime(CLOCK_MONOTONIC, &pingStart);
     while(executePing){
         bool packetSent = true;
         bool packetReceived = true;
 
-        //initialize the packet
-        memset(&packet, 0, sizeof(packet));
+        //initialize the outbound packet
+        memset(&packetOut, 0, sizeof(packetOut));
+
         if(pingSettings.ipv6){
-            packet.type = 128;
+            packetOut.type = 128;
         } else {
-            packet.type = ICMP_ECHO;
+            packetOut.type = ICMP_ECHO;
         }
+        packetOut.code = 0;
+        packetOut.id = getpid();
+        packetOut.seq = msgCount++;
+        packetOut.checksum = 0;
 
-        packet.id = getpid();
         for (int i = 0; i < msgLength - 1; ++i) {
-            packet.msg[i] = i + '0';
+            packetOut.msg[i] = i + '0';
         }
+        packetOut.checksum = checksum(&packetOut, sizeof(packetOut));
 
-        packet.msg[msgLength] = 0;
-        packet.seq = msgCount++;
-        packet.checksum = 0;
+        packetOut.msg[msgLength] = 0;
 
         usleep(pingSettings.interval);
         clock_gettime(CLOCK_MONOTONIC, &curStart);
 
         // send packet and detect errors in sending
-        count = sendto(sckt, &packet, sizeof(packet), 0, pingTarget, targetSize);
+        count = sendto(sckt, &packetOut, sizeof(packetOut), 0, pingTarget, targetSize);
         if(count <= 0){
-            std::cout<<"\nFailed to send packet, error number: "<<errno<<std::endl;
+            std::cout<<"\nFailed to send packet, error number: "<<strerror(errno)<<std::endl;
             packetSent = false;
         }
 
         //attempt tp receive packet
         if(pingSettings.ipv6){
             addressLength = sizeof(returnAddr6);
-            count = recvfrom(sckt, &packet, sizeof(packet), 0, (struct sockaddr*)&returnAddr6, (socklen_t *)&addressLength);
+            count = recvfrom(sckt, &packetIn, sizeof(packetIn), 0, (struct sockaddr*)&returnAddr6, (socklen_t *)&addressLength);
             if(count <= 0 && msgCount > 1) {
                 packetReceived = false;
+            } else {
+                msgRecvCount++;
             }
         } else{
             addressLength = sizeof(returnAddr);
-            count = recvfrom(sckt, &packet, sizeof(packet), 0, (struct sockaddr*)&returnAddr, (socklen_t *)&addressLength);
-            if(count <= 0 && msgCount > 1) {
+            count = recvfrom(sckt, &packetIn, sizeof(packetIn), 0, (struct sockaddr*)&returnAddr, (socklen_t *)&addressLength);
+            if(count <= 0) {
+                std::cout<<count<<" "<<strerror(errno)<<std::endl;
                 packetReceived = false;
+            } else {
+                msgRecvCount++;
             }
         }
 
@@ -220,16 +234,14 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
             rtt_msec = (curEnd.tv_sec - curStart.tv_sec) * 1000. + elapsed;
             total_msec += rtt_msec;
             rtt_avg_msec = total_msec / msgRecvCount;
-            msgRecvCount++;
 
             // if a packet was successfully sent output relevate results of the receive operation
             if(packetSent){
-                if(!(packet.type == 69 && packet.code == 0)){
-                    printf("Error, TCMP type %d code %d\n", packet.type, packet.code);
+                if(!(packetIn.type == 0 && packetIn.code == 0)){
+                    printf("Error, TCMP type %d code %d\n", packetOut.type, packetOut.code);
                 } else if (executePing) {
                     std::cout<<pingSettings.packet_size<<" bytes from "<<host<<" ("<<ip<<") message seq = "<<msgCount
                         <<" ttl = "<<pingSettings.timeToLive<<" rtt = "<<rtt_msec<<" ms."<<std::endl;
-                    msgRecvCount++;
                 }
             }
         } else {
@@ -276,6 +288,10 @@ unsigned short checksum(void *b, int len){
     unsigned short result;
     unsigned int sum = 0;
 
+    sum += htons(*ref);
+    ref++;
+    len-=2;
+
     // sequential words of data in the packet
     while(len > 1){
         sum += *ref;
@@ -284,7 +300,9 @@ unsigned short checksum(void *b, int len){
     }
 
     if(len == 1){ //handle remaining byte of data if present
-        sum += *(char *)ref;
+        unsigned short num;
+        *(char*)&num = *(char *)ref;
+        sum += num;
     }
     //reduce sum to 16 bits
     sum = (sum >> 16) + (sum & 0xffff);

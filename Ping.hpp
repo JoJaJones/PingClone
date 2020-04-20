@@ -8,6 +8,7 @@
 #define PINGCPP_PING_HPP
 
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <signal.h>
 #include <netdb.h>
 #include <cstring>
@@ -18,12 +19,12 @@
 #include <ctime>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-//#include "ip_icmp.h"
+#include "ip_icmp.h"
 #include <netinet/ip_icmp.h>
 #include <unistd.h>
 
 #ifndef MAX_PACKET_LENGTH
-#define MAX_PACKET_LENGTH   1024
+#define MAX_PACKET_LENGTH   64
 #endif
 
 struct Options {
