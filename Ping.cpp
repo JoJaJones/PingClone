@@ -224,7 +224,7 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
         total_time = elapsed + (1000. * (pingEnd.tv_sec - pingStart.tv_sec));
 
         if ((msgCount == pingSettings.maxCount && pingSettings.maxCount != 0) ||
-            (total_time > pingSettings.deadline && pingSettings.deadline != 0)) {
+            ((total_time/1000 > pingSettings.deadline) && pingSettings.deadline != 0)) {
             executePing = false;
         }
 
@@ -240,7 +240,7 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
     }
     std::cout<<std::endl;
     std::cout<<" Ping session summary:\n\t "
-             <<msgCount<<" packets sent. "<<msgRecvCount<<" packets received."
+             <<msgCount<<" packets sent. "<<msgRecvCount<<" packets received. "
              <<100.-(100.*msgRecvCount/msgCount)<<"% packets lost.\n\t "
              <<"Average rtt: "<<rtt_avg_msec<<"ms. "
              <<"Total time elapsed: "<<total_time<<"ms."<<std::endl;
@@ -279,31 +279,46 @@ unsigned short checksum(void *b, int len){
  * Function to set the session options based on input optional tags after the hostname
  **********************************************************************************************************/
 void setSessionOption(char opt, const char *value, struct Options &settings) {
+    std::string val(value);
+    std::stringstream num(val);
+    int res;
+    num>>res;
+    if(num.fail()){
+        opt = ' ';
+    }
+
     switch(opt){
         case 'w':
-            settings.deadline = *(unsigned int*)value;
+            settings.deadline = res;
             break;
         case 'c':
-            settings.maxCount = *(unsigned int*)value;
+            settings.maxCount = res;
             break;
         case 's':
-            settings.packet_size = *(unsigned int*)value;
+            settings.packet_size = res;
             if (settings.packet_size > MAX_PACKET_LENGTH){
                 std::cout<<"Packet size setting entered is too large packet size reduced to: "<<MAX_PACKET_LENGTH<<std::endl;
             }
             settings.packet_size = MAX_PACKET_LENGTH;
             break;
         case 'i':
-            settings.interval = (unsigned int)((*(double*)value)*1000000);
+            settings.interval = res;
             break;
         default:
-            std::cout<<"Invalid option tag given\n"
-                       "Usage: ./filename hostname -options\n\n"
+            if(!num.fail()) {
+                std::cout << "Invalid option tag given\n";
+            } else {
+                std::cout << "Invalid numerical value given\n";
+            }
+
+            std::cout<<"Usage: ./filename hostname -options\n\n"
                        "Options:\n"
                        "\t-w # deadline of # seconds\n"
                        "\t-c # send at most # echo requests\n"
                        "\t-s # change the packet size to # bytes\n"
-                       "\t-i # change the inter echo interval to # seconds\n"<<std::endl;
+                       "\t-i # change the inter echo interval to # milliseconds\n" << std::endl;
+
+            exit(1);
     }
 }
 

@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <signal.h>
+#include <sstream>
 #include <netdb.h>
 #include <cstring>
 #include <string>
