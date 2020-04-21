@@ -4,7 +4,7 @@ An implementation of the Ping functionality created in c++ as part of the Summer
 
 ### How to use this
 
-First compile the code and run it as admin from the command line providing either a url or ipv4 compatible IP address. 
+First compile the code and run it as admin from the command line providing either a domain name or ipv4 compatible IP address. 
 Additional features are available but utilizing the appropriate option tag followed by a numerical value for that option's
 value range.
 
