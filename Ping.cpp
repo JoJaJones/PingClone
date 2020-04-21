@@ -22,12 +22,14 @@ int main() {
     char ip[INET6_ADDRSTRLEN];
     int ipType, icmpType;
 //    char *host;
-    char host[] = "google.com";
+    char host[] = "10.0.0.204";
     int pingSettingsOn = 0;
     struct Options pingSettings;
     struct sockaddr_in sa;
     struct sockaddr_in6 sa6;
 
+    memset(&sa, 0, sizeof(sa));
+    memset(&sa6, 0, sizeof(sa6));
 //    if(argc < 2){
 //        std::cout<<"usage: ./ping <hostname>"<<std::endl;
 //        return -1;
@@ -47,13 +49,13 @@ int main() {
     }
 
     // generate appropriate raw socket for ICMP requests
-    echoSocket = socket(ipType, SOCK_RAW, icmpType);
+    echoSocket = socket(ipType, SOCK_RAW, IPPROTO_ICMP);
 //    for (int i = 2; i < argc; ++i) {
 //        if(argv[i][0] == '-'){
 //            //set
 //        }
 //    }
-
+//1856297388
     // set up interrupt to end the std::endless loop
     signal(SIGINT, finish);
 
@@ -61,13 +63,13 @@ int main() {
 
     // begin pinging the target address
     if(icmpType == IPPROTO_ICMP) {
-        sa.sin_addr.s_addr = htonl(sa.sin_addr.s_addr);
         pingAddr(echoSocket, host, ip, pingSettingsOn, pingSettings, (struct sockaddr *) &sa, sizeof(sa));
     } else {
         pingSettings.ipv6 = true;
         pingAddr(echoSocket, host, ip, pingSettingsOn, pingSettings, (struct sockaddr *) &sa6, sizeof(sa6));
     }
 
+    std::cout<<"Goodbye!"<<std::endl;
 }
 
 /**********************************************************************************************************
@@ -92,13 +94,15 @@ void setIP(char *host, char *ip, int &ipType, int &icmpType) {
     char res[INET6_ADDRSTRLEN];
     struct addrinfo *target;
 
+//    struct ip
+
     //init struct to 0s
     memset(&ipSettings, 0, sizeof(ipSettings));
 
     // change this line to enable Ipv6 ips (not functional yet)
     ipSettings.ai_family = AF_INET;
 
-    ipSettings.ai_socktype = SOCK_STREAM;
+    ipSettings.ai_socktype = SOCK_RAW;
     if ((status = getaddrinfo(host, 0, &ipSettings, &target)) != 0) {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
         exit(1);
@@ -134,16 +138,23 @@ void setIP(char *host, char *ip, int &ipType, int &icmpType) {
  **********************************************************************************************************/
 void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Options &pingSettings,
               struct sockaddr *pingTarget, int targetSize) {
-    struct timespec pingStart, pingEnd, curStart, curEnd;    // structs for timing ping process
-    struct Packet packetOut, packetIn;                                    // packet struct
+    struct timespec pingStart, pingEnd, curStart, curEnd;       // structs for timing ping process
+
+    BYTE recvBuff[MAX_PACKET_LENGTH];
+    struct icmpv4 icmpOut, icmpIn;                              // ipv4 icmp packet struct
+    struct icmpv6 icmp6Out, icmp6In;
     struct sockaddr_in returnAddr;
+    memset(&returnAddr, 0, sizeof(returnAddr));
     struct sockaddr_in6 returnAddr6;
+    memset(&returnAddr6, 0, sizeof(returnAddr6));
     struct timeval timeOut;
     int count;
-
     long double rtt_msec = 0., rtt_avg_msec = 0., total_msec = 0., total_time = 0.;
     double elapsed;
 
+
+    loadIPHeader(&icmpOut.iphdr, &pingSettings, ip);
+    loadIPHeader(&icmpIn.iphdr, &pingSettings, ip);
     unsigned short msgCount = 0;
     int msgRecvCount = 0, addressLength,
             msgLength = pingSettings.packet_size - 8;
@@ -153,12 +164,12 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
     timeOut.tv_usec = (int)(pingSettings.timeout * 1000)%1000000;
 
     // set time to live for packets
-//    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)) != 0){
-//        std::cout<<"sockoptfail"<<std::endl;
-//        return;
-//    } else {
-//        std::cout << "\nSocket set to TTL..." << std::endl;
-//    }
+    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)) != 0){
+        std::cout<<"sockoptfail"<<std::endl;
+        return;
+    } else {
+        std::cout << "\nSocket set to TTL..." << std::endl;
+    }
 
     // set timeout for receiving a response
     if (setsockopt (sckt, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeOut, sizeof(timeOut)) < 0) {
@@ -176,30 +187,30 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
         bool packetReceived = true;
 
         //initialize the outbound packet
-        memset(&packetOut, 0, sizeof(packetOut));
+        memset(&icmpOut.packet, 0, sizeof(icmpOut.packet));
 
         if(pingSettings.ipv6){
-            packetOut.type = 128;
+            icmpOut.packet.type = 128;
         } else {
-            packetOut.type = ICMP_ECHO;
+            icmpOut.packet.type = ICMP_ECHO;
         }
-        packetOut.code = 0;
-        packetOut.id = getpid();
-        packetOut.seq = msgCount++;
-        packetOut.checksum = 0;
+        icmpOut.packet.code = 0;
+        icmpOut.packet.id = getpid();
+        icmpOut.packet.seq = msgCount++;
+        icmpOut.packet.checksum = 0;
 
         for (int i = 0; i < msgLength - 1; ++i) {
-            packetOut.msg[i] = i + '0';
+            icmpOut.packet.msg[i] = i + '0';
         }
-        packetOut.checksum = checksum(&packetOut, sizeof(packetOut));
+        icmpOut.packet.checksum = checksum(&icmpOut.packet, sizeof(icmpOut.packet));
 
-        packetOut.msg[msgLength] = 0;
+        icmpOut.packet.msg[msgLength] = 0;
 
         usleep(pingSettings.interval);
         clock_gettime(CLOCK_MONOTONIC, &curStart);
 
         // send packet and detect errors in sending
-        count = sendto(sckt, &packetOut, sizeof(packetOut), 0, pingTarget, targetSize);
+        count = sendto(sckt, &icmpOut.packet, sizeof(icmpOut.packet), 0, pingTarget, targetSize);
         if(count <= 0){
             std::cout<<"\nFailed to send packet, error number: "<<strerror(errno)<<std::endl;
             packetSent = false;
@@ -208,7 +219,7 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
         //attempt tp receive packet
         if(pingSettings.ipv6){
             addressLength = sizeof(returnAddr6);
-            count = recvfrom(sckt, &packetIn, sizeof(packetIn), 0, (struct sockaddr*)&returnAddr6, (socklen_t *)&addressLength);
+            count = recvfrom(sckt, recvBuff, MAX_PACKET_LENGTH, 0, (struct sockaddr*)&returnAddr6, (socklen_t *)&addressLength);
             if(count <= 0 && msgCount > 1) {
                 packetReceived = false;
             } else {
@@ -216,7 +227,7 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
             }
         } else{
             addressLength = sizeof(returnAddr);
-            count = recvfrom(sckt, &packetIn, sizeof(packetIn), 0, (struct sockaddr*)&returnAddr, (socklen_t *)&addressLength);
+            count = recvfrom(sckt, recvBuff, MAX_PACKET_LENGTH+40, 0, (struct sockaddr*)&returnAddr, (socklen_t *)&addressLength);
             if(count <= 0) {
                 std::cout<<count<<" "<<strerror(errno)<<std::endl;
                 packetReceived = false;
@@ -237,8 +248,8 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
 
             // if a packet was successfully sent output relevate results of the receive operation
             if(packetSent){
-                if(!(packetIn.type == 0 && packetIn.code == 0)){
-                    printf("Error, TCMP type %d code %d\n", packetOut.type, packetOut.code);
+                if(!(icmpIn.packet.type == 0 && icmpIn.packet.code == 0)){
+                    printf("Error, TCMP type %d code %d\n", icmpOut.packet.type, icmpOut.packet.code);
                 } else if (executePing) {
                     std::cout<<pingSettings.packet_size<<" bytes from "<<host<<" ("<<ip<<") message seq = "<<msgCount
                         <<" ttl = "<<pingSettings.timeToLive<<" rtt = "<<rtt_msec<<" ms."<<std::endl;
@@ -311,3 +322,55 @@ unsigned short checksum(void *b, int len){
     return result;
 }
 
+void loadIPHeader(struct ip *hdr, struct Options *pingSettings, const char *ip) {
+
+    memset(hdr, 0, 20);
+    hdr->ip_v = 4;
+    hdr->ip_hl = 5;
+    hdr->ip_tos = 0;
+    hdr->ip_len = 20 + MAX_PACKET_LENGTH;
+    hdr->ip_id = getpid();
+    hdr->ip_off = IP_DF;
+    hdr->ip_ttl = pingSettings->timeToLive;
+    hdr->ip_p = 1;
+    hdr->ip_sum = 0;
+    getAddrFromIP(ip, AF_INET, (BYTE*)&hdr->ip_dst);    //3468835544
+    getAddrFromIP(nullptr, AF_INET, (BYTE*)&hdr->ip_src);
+    hdr->ip_sum = checksum(&hdr, 20);
+}
+
+void loadIPHeader(struct ipv6 *hdr, struct Options *pingSettings) {
+
+}
+
+void getAddrFromIP(const char *ip, int ipType, BYTE *resAddr) {
+    int status;                  // variable to hold error flag for debugging
+    struct addrinfo ipSettings;  // settings for getaddrinfo funciont
+    char res[INET6_ADDRSTRLEN];
+    struct addrinfo *target;
+    BYTE buf[16];
+
+    memset(&buf, 0, 16);
+
+    //init struct to 0s
+    memset(&ipSettings, 0, sizeof(ipSettings));
+
+    // change this line to enable Ipv6 ips (not functional yet)
+    ipSettings.ai_family = ipType;
+
+    ipSettings.ai_socktype = SOCK_STREAM;
+    ipSettings.ai_flags = AI_PASSIVE;
+    if ((status = getaddrinfo(ip, "8880", &ipSettings, &target)) != 0) {
+        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        exit(1);
+    }
+
+    // load ip address character array
+    if (target->ai_family == AF_INET){
+        strcpy((char*)resAddr,(char *)(target->ai_addr->sa_data + 2));  //extract the
+        std::cout<<*(unsigned int*)resAddr<<std::endl;
+    } else{
+        inet_ntop(AF_INET6, &((struct sockaddr_in6*)target->ai_addr)->sin6_addr, res, sizeof res);
+    }
+
+}
