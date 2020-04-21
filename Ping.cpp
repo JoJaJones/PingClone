@@ -22,19 +22,18 @@ int main(int argc, char *argv[]) {
     int echoSocket;
     char ip[INET6_ADDRSTRLEN];
     int ipType, icmpType;
-//    char *host;
-    char host[] = "google.com";
+    char *host;
     int pingSettingsOn = 0;
     struct Options pingSettings;
     struct sockaddr_in sa;
     struct sockaddr_in6 sa6;
 
-//    if(argc < 2){
-//        std::cout<<"usage: ./ping <hostname>"<<std::endl;
-//        return -1;
-//    }
-//
-//    host = argv[1];
+    if(argc < 2){
+        std::cout<<"usage: ./ping <hostname>"<<std::endl;
+        return -1;
+    }
+
+    host = argv[1];
 
     // load ip, ip format, and proper ICMP proto for the format
     setIP(host, ip, ipType, icmpType);
@@ -52,8 +51,11 @@ int main(int argc, char *argv[]) {
     echoSocket = socket(ipType, SOCK_RAW, icmpType);
 
     for (int i = 2; i < argc; ++i) {
-        if(argv[i][0] == '-'){
-
+        if(argv[i][0] == '-' && argc - i >= 2){
+            setSessionOption(argv[i][1], argv[i+1], pingSettings);
+            i++;
+        } else {
+            setSessionOption(host[0], host, pingSettings);      // diplay error for invalid tag
         }
     }
 
@@ -63,12 +65,8 @@ int main(int argc, char *argv[]) {
     std::cout<<ip<<std::endl;
 
     // begin pinging the target address
-    if(icmpType == IPPROTO_ICMP) {
-        pingAddr(echoSocket, host, ip, pingSettingsOn, pingSettings, (struct sockaddr *) &sa, sizeof(sa));
-    } else {
-        pingSettings.ipv6 = true;
-        pingAddr(echoSocket, host, ip, pingSettingsOn, pingSettings, (struct sockaddr *) &sa6, sizeof(sa6));
-    }
+
+    pingAddr(echoSocket, host, ip, pingSettingsOn, pingSettings, (struct sockaddr *) &sa, sizeof(sa));
 
 }
 
@@ -136,12 +134,10 @@ void setIP(char *host, char *ip, int &ipType, int &icmpType) {
  **********************************************************************************************************/
 void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Options &pingSettings,
               struct sockaddr *pingTarget, int targetSize) {
-    struct timespec pingStart, pingEnd, curStart, curEnd;    // structs for timing ping process
-    struct icmpPacket packet;                                    // packet struct
+    struct timespec pingStart, pingEnd, curStart, curEnd;       // structs for timing ping process
+    struct icmpPacket packet;                                   // packet struct
     struct sockaddr_in returnAddr;
-    struct sockaddr_in6 returnAddr6;
-    struct timeval timeOut;
-    int count;
+    int count, ttl_val = 64;
 
     long double rtt_msec = 0., rtt_avg_msec = 0., total_msec = 0., total_time = 0.;
     double elapsed;
@@ -150,11 +146,11 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
             msgLength = pingSettings.packet_size - 8;
 
     // set timeout time from pingSettings struct
-    timeOut.tv_sec = (int)(pingSettings.timeout / 1000);
-    timeOut.tv_usec = (int)(pingSettings.timeout * 1000);
+    pingSettings.timeout.tv_sec = 1;
+    pingSettings.timeout.tv_usec = 0;
 
     // set time to live for packets
-    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &pingSettings.timeToLive, sizeof(pingSettings.timeToLive)) != 0){
+    if(setsockopt(sckt, IPPROTO_IP, IP_TTL, &ttl_val, sizeof(ttl_val)) != 0){
         std::cout<<"sockoptfail"<<std::endl;
         return;
     } else {
@@ -162,22 +158,16 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
     }
 
     // set timeout for receiving a response
-    setsockopt(sckt, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeOut, sizeof(timeOut));
-
+    setsockopt(sckt, SOL_SOCKET, SO_RCVTIMEO, (const char*)&pingSettings.timeout, sizeof(pingSettings.timeout));
 
     clock_gettime(CLOCK_MONOTONIC, &pingStart);
     while(executePing){
         bool packetSent = true;
-        bool packetReceived = true;
 
         //initialize the packet
         memset(&packet, 0, sizeof(packet));
-        if(pingSettings.ipv6){
-            packet.type = 128;
-        } else {
-            packet.type = ICMP_ECHO;
-        }
 
+        packet.type = ICMP_ECHO;
         packet.id = getpid();
         for (int i = 0; i < msgLength - 1; ++i) {
             packet.msg[i] = i + '0';
@@ -197,47 +187,47 @@ void pingAddr(int sckt, char *host, char *ip, const int &settings, struct Option
             packetSent = false;
         }
 
-
+        //receive packet or display packet loss message
         addressLength = sizeof(returnAddr);
         count = recvfrom(sckt, &packet, sizeof(packet), 0, (struct sockaddr*)&returnAddr, (socklen_t *)&addressLength);
         if(count <= 0 && msgCount > 1) {
             std::cout<<pingSettings.packet_size<<" bytes from "<<host<<" ("<<ip<<") message seq = "<<msgCount
                      <<" packet lost."<<std::endl;
-//            std::cout<<"\nFailed to receive packet, error number: "<<strerror(errno)<<std::endl;
-            packetReceived = false;
         } else {
             clock_gettime(CLOCK_MONOTONIC, &curEnd);
 
-            elapsed = ((double) (curEnd.tv_nsec - curStart.tv_nsec)) / 1000000.;
-
-            rtt_msec = (curEnd.tv_sec - curStart.tv_sec) * 1000. + elapsed;
-            total_msec += rtt_msec;
-            rtt_avg_msec = total_msec / msgRecvCount;
-            msgRecvCount++;
-
-            // if a packet was successfully sent output relevate results of the receive operation
+            // if a packet was successfully sent output relevant results of the receive operation
             if (packetSent) {
                 if (!(packet.type == 69 && packet.code == 0)) {
                     printf("Error, TCMP type %d code %d\n", packet.type, packet.code);
-                } else if (executePing) {
+                } else if (executePing) {                                                   //if interrupt not yet triggered
+                    //calculate rtt
+                    elapsed = ((double) (curEnd.tv_nsec - curStart.tv_nsec)) / 1000000.;
+
+                    rtt_msec = (curEnd.tv_sec - curStart.tv_sec) * 1000. + elapsed;
+                    total_msec += rtt_msec;
+                    rtt_avg_msec = total_msec / msgRecvCount;
+
+                    // display response received results
                     std::cout << pingSettings.packet_size << " bytes from " << host << " (" << ip << ") message seq = "
                               << msgCount
-                              << " ttl = " << pingSettings.timeToLive << " rtt = " << rtt_msec << " ms." << std::endl;
+                              << " ttl = " << ttl_val << " rtt = " << rtt_msec << " ms." << std::endl;
                     msgRecvCount++;
                 }
             }
-
-
-            // calc time elapsed so far for deadline check
-            clock_gettime(CLOCK_MONOTONIC, &pingEnd);
-            elapsed = ((double) (pingEnd.tv_nsec - pingStart.tv_nsec)) / 1000000.;
-            total_time = elapsed + (1000. * (pingEnd.tv_sec - pingStart.tv_sec));
-
-            if ((msgCount == pingSettings.maxCount && pingSettings.maxCount != 0) ||
-                (total_time > pingSettings.deadline && pingSettings.deadline != 0)) {
-                executePing = false;
-            }
         }
+
+
+        // calc time elapsed so far for deadline check
+        clock_gettime(CLOCK_MONOTONIC, &pingEnd);
+        elapsed = ((double) (pingEnd.tv_nsec - pingStart.tv_nsec)) / 1000000.;
+        total_time = elapsed + (1000. * (pingEnd.tv_sec - pingStart.tv_sec));
+
+        if ((msgCount == pingSettings.maxCount && pingSettings.maxCount != 0) ||
+            (total_time > pingSettings.deadline && pingSettings.deadline != 0)) {
+            executePing = false;
+        }
+
 
     }
 
@@ -285,5 +275,36 @@ unsigned short checksum(void *b, int len){
     return result;
 }
 
+/**********************************************************************************************************
+ * Function to set the session options based on input optional tags after the hostname
+ **********************************************************************************************************/
+void setSessionOption(char opt, const char *value, struct Options &settings) {
+    switch(opt){
+        case 'w':
+            settings.deadline = *(unsigned int*)value;
+            break;
+        case 'c':
+            settings.maxCount = *(unsigned int*)value;
+            break;
+        case 's':
+            settings.packet_size = *(unsigned int*)value;
+            if (settings.packet_size > MAX_PACKET_LENGTH){
+                std::cout<<"Packet size setting entered is too large packet size reduced to: "<<MAX_PACKET_LENGTH<<std::endl;
+            }
+            settings.packet_size = MAX_PACKET_LENGTH;
+            break;
+        case 'i':
+            settings.interval = (unsigned int)((*(double*)value)*1000000);
+            break;
+        default:
+            std::cout<<"Invalid option tag given\n"
+                       "Usage: ./filename hostname -options\n\n"
+                       "Options:\n"
+                       "\t-w # deadline of # seconds\n"
+                       "\t-c # send at most # echo requests\n"
+                       "\t-s # change the packet size to # bytes\n"
+                       "\t-i # change the inter echo interval to # seconds\n"<<std::endl;
+    }
+}
 
 
